@@ -1,0 +1,16 @@
+model {
+   for ( i in 1 : N ) 
+   { 
+      Y[i] ~ dbern( P[i] )
+      logit(P[i]) <-  beta0 + beta1*X[i] + b0[clust[i]]
+   }
+   # Priors
+   sigma_int~dunif(0, sig.up) # SD hyperparameter for random intercepts
+   tau_int <- 1/(sigma_int*sigma_int)
+   for (i in 1:nclust) {
+    b0[i]~dnorm(0, tau_int) # Random intercepts
+    }
+   # Priors for marginal effects
+    beta0~dnorm(0, p0)
+    beta1~dnorm(0, p1)
+}

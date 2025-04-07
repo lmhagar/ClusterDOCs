@@ -28,6 +28,7 @@ d_ae <- 0.04
 d_comp <- 0.1
 d_ntol <- 0.1
 Ms <- seq(100, 200, 10)
+Mfs <- ceiling(1.25*Ms)
 
 ## parameters for low ICC setting
 beta0s <- c(-3.9746, -3.9746, -3.9746, -3.9746)
@@ -37,6 +38,8 @@ phi1s <- c(0.0000, -0.1550, -0.1891, -0.4675)
 for (ii in 1:4){
   for (j in 1:length(Ms)){
     M <- Ms[j]
+    Mf <- Mfs[j]
+    
     sim.res <- foreach(k=1:m, .packages=c('rjags', 'coda', 'purrr'), .combine=rbind,
                        .options.snow=opts) %dopar% {
                          
@@ -80,7 +83,7 @@ for (ii in 1:4){
                          
                          n.chains = 1
                          n.burnin = 500
-                         n.draws = 1500
+                         n.draws = 2000
                          n.thin = 1
                          
                          log.int.wd <- paste(getwd(), '/jags_logistic_int.txt', sep='')
@@ -164,11 +167,19 @@ for (ii in 1:4){
                          np.prob.ae <- mean(pnorm(d_ae, ifelse(is.finite(ldiff.ae), ldiff.ae, 
                                                                max(na.omit(ldiff.ae)) + 1), kd.ae$bw, lower.tail = FALSE))
                          
+                         if (np.prob.ae < 0.00004){
+                           np.prob.ae <- pnorm(d_ae, mean(na.omit(ldiff.ae)), sd(na.omit(ldiff.ae)), lower.tail = FALSE)
+                         }
+                         
                          ldiff.comp <- save0.comp - save1.comp
                          
                          kd.comp <- density(na.omit(ldiff.comp))
                          np.prob.comp <- mean(pnorm(d_comp, ifelse(is.finite(ldiff.comp), ldiff.comp, 
                                                                    max(na.omit(ldiff.comp)) + 1), kd.comp$bw, lower.tail = FALSE))
+                         
+                         if (np.prob.comp < 0.00004){
+                           np.prob.comp <- pnorm(d_comp, mean(na.omit(ldiff.comp)), sd(na.omit(ldiff.comp)), lower.tail = FALSE)
+                         }
                          
                          ldiff.tol <- save1.tol - save0.tol
                          
@@ -176,8 +187,68 @@ for (ii in 1:4){
                          np.prob.tol <- mean(pnorm(d_ntol, ifelse(is.finite(ldiff.tol), ldiff.tol, 
                                                                   max(na.omit(ldiff.tol)) + 1), kd.tol$bw, lower.tail = FALSE))
                          
-
-                         c(np.prob.ae, np.prob.comp, np.prob.tol)
+                         if (np.prob.tol < 0.00004){
+                           np.prob.tol <- pnorm(d_ntol, mean(na.omit(ldiff.tol)), sd(na.omit(ldiff.tol)), lower.tail = FALSE)
+                         }
+                         
+                         dat <- dat[, c(-2, -3)]
+                         ## now get the probability for the final analysis
+                         nclust <- Mf
+                         mclust <- c(mclust, rdunif(Mf - M, 4, 6))
+                         
+                         for (i in (M+1):Mf){
+                           ae.b0 <- rnorm(1, 0, sig_u)
+                           x.temp <- rep(runif(1)< 1/2, mclust[i])
+                           ae.eta <- expit(beta0 + ae.b0 + beta1*x.temp)
+                           ae.temp <- rbinom(mclust[i], 1, ae.eta)
+                           
+                           dat <- rbind(dat,
+                                        data.frame(ae = ae.temp, x = x.temp,
+                                                   clust = rep(i, mclust[i])))
+                         }
+                         
+                         log.int.wd <- paste(getwd(), '/jags_logistic_int.txt', sep='')
+                         model1.fit <- jags.model(file=log.int.wd,
+                                                  data=list(N=nrow(dat), Y=dat$ae, clust = dat$clust,
+                                                            nclust = nclust, X = dat$x,
+                                                            p0= 0.0001, p1 = 0.001,
+                                                            sig.up = 25),
+                                                  n.chains = n.chains)
+                         
+                         update(model1.fit, n.burnin)
+                         
+                         model1.samples.ae <- coda.samples(model1.fit, c("beta0", "beta1", "sigma_int", "b0"), 
+                                                           n.iter=n.draws, thin=n.thin)
+                         
+                         beta0.post.ae <- unlist(model1.samples.ae[,ncol(model1.samples.ae[[1]]) - 2])
+                         beta1.post.ae <- unlist(model1.samples.ae[,ncol(model1.samples.ae[[1]]) - 1])
+                         
+                         save0.ae <- NULL
+                         save1.ae <- NULL
+                         mm <- nrow(model1.samples.ae[[1]])
+                         for (i in 1:mm){
+                           mu1.ae <- expit(beta0.post.ae[i] + beta1.post.ae[i] + model1.samples.ae[[1]][i, 1:nclust])
+                           w1 <- rexp(nclust, 1)
+                           w1 <- w1/sum(w1)
+                           
+                           mu0.ae <- expit(beta0.post.ae[i] + model1.samples.ae[[1]][i, 1:nclust])
+                           w0 <- rexp(nclust, 1)
+                           w0 <- w0/sum(w0)
+                           
+                           save1.ae[i] <- sum(w1*mu1.ae) 
+                           save0.ae[i] <- sum(w0*mu0.ae)
+                         }
+                         ldiff.ae2 <- save1.ae - save0.ae
+                         
+                         kd.ae2 <- density(na.omit(ldiff.ae2))
+                         np.prob.ae2 <- mean(pnorm(d_ae, ifelse(is.finite(ldiff.ae2), ldiff.ae2, 
+                                                                max(na.omit(ldiff.ae2)) + 1), kd.ae2$bw, lower.tail = FALSE))
+                         
+                         if (np.prob.ae2 < 0.00004){
+                           np.prob.ae2 <- pnorm(d_ae, mean(na.omit(ldiff.ae2)), sd(na.omit(ldiff.ae2)), lower.tail = FALSE)
+                         } 
+                         
+                         c(np.prob.ae, np.prob.comp, np.prob.tol, np.prob.ae2)
                        }
     write.csv(sim.res, paste0("scen1",ii,"_log_c_", M, ".csv"), row.names = FALSE)
   }
@@ -191,6 +262,7 @@ phi1s <- c(0.0000, -0.1658, -0.2048, -0.5105)
 for (ii in 1:4){
   for (j in 1:length(Ms)){
     M <- Ms[j]
+    Mf <- Mfs[j]
     sim.res <- foreach(k=1:m, .packages=c('rjags', 'coda', 'purrr'), .combine=rbind,
                        .options.snow=opts) %dopar% {
                          
@@ -234,7 +306,7 @@ for (ii in 1:4){
                          
                          n.chains = 1
                          n.burnin = 500
-                         n.draws = 1500
+                         n.draws = 2000
                          n.thin = 1
                          
                          log.int.wd <- paste(getwd(), '/jags_logistic_int.txt', sep='')
@@ -318,11 +390,19 @@ for (ii in 1:4){
                          np.prob.ae <- mean(pnorm(d_ae, ifelse(is.finite(ldiff.ae), ldiff.ae, 
                                                                max(na.omit(ldiff.ae)) + 1), kd.ae$bw, lower.tail = FALSE))
                          
+                         if (np.prob.ae < 0.00004){
+                           np.prob.ae <- pnorm(d_ae, mean(na.omit(ldiff.ae)), sd(na.omit(ldiff.ae)), lower.tail = FALSE)
+                         }
+                         
                          ldiff.comp <- save0.comp - save1.comp
                          
                          kd.comp <- density(na.omit(ldiff.comp))
                          np.prob.comp <- mean(pnorm(d_comp, ifelse(is.finite(ldiff.comp), ldiff.comp, 
                                                                    max(na.omit(ldiff.comp)) + 1), kd.comp$bw, lower.tail = FALSE))
+                         
+                         if (np.prob.comp < 0.00004){
+                           np.prob.comp <- pnorm(d_comp, mean(na.omit(ldiff.comp)), sd(na.omit(ldiff.comp)), lower.tail = FALSE)
+                         }
                          
                          ldiff.tol <- save1.tol - save0.tol
                          
@@ -331,7 +411,69 @@ for (ii in 1:4){
                                                                   max(na.omit(ldiff.tol)) + 1), kd.tol$bw, lower.tail = FALSE))
                          
                          
-                         c(np.prob.ae, np.prob.comp, np.prob.tol)
+                         if (np.prob.tol < 0.00004){
+                           np.prob.tol <- pnorm(d_ntol, mean(na.omit(ldiff.tol)), sd(na.omit(ldiff.tol)), lower.tail = FALSE)
+                         }
+                         
+                         
+                         dat <- dat[, c(-2, -3)]
+                         ## now get the probability for the final analysis
+                         nclust <- Mf
+                         mclust <- c(mclust, rdunif(Mf - M, 4, 6))
+                         
+                         for (i in (M+1):Mf){
+                           ae.b0 <- rnorm(1, 0, sig_u)
+                           x.temp <- rep(runif(1)< 1/2, mclust[i])
+                           ae.eta <- expit(beta0 + ae.b0 + beta1*x.temp)
+                           ae.temp <- rbinom(mclust[i], 1, ae.eta)
+                           
+                           dat <- rbind(dat,
+                                        data.frame(ae = ae.temp, x = x.temp,
+                                                   clust = rep(i, mclust[i])))
+                         }
+                         
+                         log.int.wd <- paste(getwd(), '/jags_logistic_int.txt', sep='')
+                         model1.fit <- jags.model(file=log.int.wd,
+                                                  data=list(N=nrow(dat), Y=dat$ae, clust = dat$clust,
+                                                            nclust = nclust, X = dat$x,
+                                                            p0= 0.0001, p1 = 0.001,
+                                                            sig.up = 25),
+                                                  n.chains = n.chains)
+                         
+                         update(model1.fit, n.burnin)
+                         
+                         model1.samples.ae <- coda.samples(model1.fit, c("beta0", "beta1", "sigma_int", "b0"), 
+                                                           n.iter=n.draws, thin=n.thin)
+                         
+                         beta0.post.ae <- unlist(model1.samples.ae[,ncol(model1.samples.ae[[1]]) - 2])
+                         beta1.post.ae <- unlist(model1.samples.ae[,ncol(model1.samples.ae[[1]]) - 1])
+                         
+                         save0.ae <- NULL
+                         save1.ae <- NULL
+                         mm <- nrow(model1.samples.ae[[1]])
+                         for (i in 1:mm){
+                           mu1.ae <- expit(beta0.post.ae[i] + beta1.post.ae[i] + model1.samples.ae[[1]][i, 1:nclust])
+                           w1 <- rexp(nclust, 1)
+                           w1 <- w1/sum(w1)
+                           
+                           mu0.ae <- expit(beta0.post.ae[i] + model1.samples.ae[[1]][i, 1:nclust])
+                           w0 <- rexp(nclust, 1)
+                           w0 <- w0/sum(w0)
+                           
+                           save1.ae[i] <- sum(w1*mu1.ae) 
+                           save0.ae[i] <- sum(w0*mu0.ae)
+                         }
+                         ldiff.ae2 <- save1.ae - save0.ae
+                         
+                         kd.ae2 <- density(na.omit(ldiff.ae2))
+                         np.prob.ae2 <- mean(pnorm(d_ae, ifelse(is.finite(ldiff.ae2), ldiff.ae2, 
+                                                                max(na.omit(ldiff.ae2)) + 1), kd.ae2$bw, lower.tail = FALSE))
+                         
+                         if (np.prob.ae2 < 0.00004){
+                           np.prob.ae2 <- pnorm(d_ae, mean(na.omit(ldiff.ae2)), sd(na.omit(ldiff.ae2)), lower.tail = FALSE)
+                         } 
+                         
+                         c(np.prob.ae, np.prob.comp, np.prob.tol, np.prob.ae2)
                        }
     write.csv(sim.res, paste0("scen2",ii,"_log_c_", M, ".csv"), row.names = FALSE)
   }
@@ -345,6 +487,7 @@ phi1s <- c(0.0000, -0.1815, -0.2237, -0.5643)
 for (ii in 1:4){
   for (j in 1:length(Ms)){
     M <- Ms[j]
+    Mf <- Mfs[j]
     sim.res <- foreach(k=1:m, .packages=c('rjags', 'coda', 'purrr'), .combine=rbind,
                        .options.snow=opts) %dopar% {
                          
@@ -388,7 +531,7 @@ for (ii in 1:4){
                          
                          n.chains = 1
                          n.burnin = 500
-                         n.draws = 1500
+                         n.draws = 2000
                          n.thin = 1
                          
                          log.int.wd <- paste(getwd(), '/jags_logistic_int.txt', sep='')
@@ -472,11 +615,19 @@ for (ii in 1:4){
                          np.prob.ae <- mean(pnorm(d_ae, ifelse(is.finite(ldiff.ae), ldiff.ae, 
                                                                max(na.omit(ldiff.ae)) + 1), kd.ae$bw, lower.tail = FALSE))
                          
+                         if (np.prob.ae < 0.00004){
+                           np.prob.ae <- pnorm(d_ae, mean(na.omit(ldiff.ae)), sd(na.omit(ldiff.ae)), lower.tail = FALSE)
+                         }
+                         
                          ldiff.comp <- save0.comp - save1.comp
                          
                          kd.comp <- density(na.omit(ldiff.comp))
                          np.prob.comp <- mean(pnorm(d_comp, ifelse(is.finite(ldiff.comp), ldiff.comp, 
                                                                    max(na.omit(ldiff.comp)) + 1), kd.comp$bw, lower.tail = FALSE))
+                         
+                         if (np.prob.comp < 0.00004){
+                           np.prob.comp <- pnorm(d_comp, mean(na.omit(ldiff.comp)), sd(na.omit(ldiff.comp)), lower.tail = FALSE)
+                         }
                          
                          ldiff.tol <- save1.tol - save0.tol
                          
@@ -484,8 +635,69 @@ for (ii in 1:4){
                          np.prob.tol <- mean(pnorm(d_ntol, ifelse(is.finite(ldiff.tol), ldiff.tol, 
                                                                   max(na.omit(ldiff.tol)) + 1), kd.tol$bw, lower.tail = FALSE))
                          
+                         if (np.prob.tol < 0.00004){
+                           np.prob.tol <- pnorm(d_ntol, mean(na.omit(ldiff.tol)), sd(na.omit(ldiff.tol)), lower.tail = FALSE)
+                         }
                          
-                         c(np.prob.ae, np.prob.comp, np.prob.tol)
+                         
+                         dat <- dat[, c(-2, -3)]
+                         ## now get the probability for the final analysis
+                         nclust <- Mf
+                         mclust <- c(mclust, rdunif(Mf - M, 4, 6))
+                         
+                         for (i in (M+1):Mf){
+                           ae.b0 <- rnorm(1, 0, sig_u)
+                           x.temp <- rep(runif(1)< 1/2, mclust[i])
+                           ae.eta <- expit(beta0 + ae.b0 + beta1*x.temp)
+                           ae.temp <- rbinom(mclust[i], 1, ae.eta)
+                           
+                           dat <- rbind(dat,
+                                        data.frame(ae = ae.temp, x = x.temp,
+                                                   clust = rep(i, mclust[i])))
+                         }
+                         
+                         log.int.wd <- paste(getwd(), '/jags_logistic_int.txt', sep='')
+                         model1.fit <- jags.model(file=log.int.wd,
+                                                  data=list(N=nrow(dat), Y=dat$ae, clust = dat$clust,
+                                                            nclust = nclust, X = dat$x,
+                                                            p0= 0.0001, p1 = 0.001,
+                                                            sig.up = 25),
+                                                  n.chains = n.chains)
+                         
+                         update(model1.fit, n.burnin)
+                         
+                         model1.samples.ae <- coda.samples(model1.fit, c("beta0", "beta1", "sigma_int", "b0"), 
+                                                           n.iter=n.draws, thin=n.thin)
+                         
+                         beta0.post.ae <- unlist(model1.samples.ae[,ncol(model1.samples.ae[[1]]) - 2])
+                         beta1.post.ae <- unlist(model1.samples.ae[,ncol(model1.samples.ae[[1]]) - 1])
+                         
+                         save0.ae <- NULL
+                         save1.ae <- NULL
+                         mm <- nrow(model1.samples.ae[[1]])
+                         for (i in 1:mm){
+                           mu1.ae <- expit(beta0.post.ae[i] + beta1.post.ae[i] + model1.samples.ae[[1]][i, 1:nclust])
+                           w1 <- rexp(nclust, 1)
+                           w1 <- w1/sum(w1)
+                           
+                           mu0.ae <- expit(beta0.post.ae[i] + model1.samples.ae[[1]][i, 1:nclust])
+                           w0 <- rexp(nclust, 1)
+                           w0 <- w0/sum(w0)
+                           
+                           save1.ae[i] <- sum(w1*mu1.ae) 
+                           save0.ae[i] <- sum(w0*mu0.ae)
+                         }
+                         ldiff.ae2 <- save1.ae - save0.ae
+                         
+                         kd.ae2 <- density(na.omit(ldiff.ae2))
+                         np.prob.ae2 <- mean(pnorm(d_ae, ifelse(is.finite(ldiff.ae2), ldiff.ae2, 
+                                                                max(na.omit(ldiff.ae2)) + 1), kd.ae2$bw, lower.tail = FALSE))
+                         
+                         if (np.prob.ae2 < 0.00004){
+                           np.prob.ae2 <- pnorm(d_ae, mean(na.omit(ldiff.ae2)), sd(na.omit(ldiff.ae2)), lower.tail = FALSE)
+                         } 
+                         
+                         c(np.prob.ae, np.prob.comp, np.prob.tol, np.prob.ae2)
                        }
     write.csv(sim.res, paste0("scen3",ii,"_log_c_", M, ".csv"), row.names = FALSE)
   }

@@ -224,16 +224,16 @@ MM <- 10000
 for (s in 1:3){
 
   Ms <- seq(100, 200, 10)
-  gam <- c(0.8, 0.54, 0.54)
+  gam <- c(0.8, 0.55, 0.55)
   
   # process to implement the bootstrap resampling
   for (j in 1:4){
     
-    assign(paste0("res", s, j, "_120"), read.csv(paste0("scen", s, j, "_log_c_120.csv")))
-    assign(paste0("res", s, j, "_170"), read.csv(paste0("scen", s, j, "_log_c_170.csv")))
+    assign(paste0("res", s, j, "_120"), read.csv(paste0("scen", s, j, "_log_c_120.csv"))[,1:3])
+    assign(paste0("res", s, j, "_180"), read.csv(paste0("scen", s, j, "_log_c_180.csv"))[,1:3])
     
     samp1 <- get(paste0("res", s, j, "_120"))
-    samp2 <- get(paste0("res", s, j, "_170"))
+    samp2 <- get(paste0("res", s, j, "_180"))
            
     boot.temp <- foreach(k=1:MM, .packages=c('rjags', 'coda', 'purrr'), .combine=rbind,
                          .options.snow=opts) %dopar% {
@@ -241,7 +241,7 @@ for (s in 1:3){
                            samp1.temp <- samp1[sample(1:m, m, replace = TRUE),]
                            samp2.temp <- samp2[sample(1:m, m, replace = TRUE),]
                            
-                           bootstrap_doc(samp1.temp, samp2.temp, 120, 170, 100, 200,
+                           bootstrap_doc(samp1.temp, samp2.temp, 120, 180, 100, 200,
                                     gam, 0.85)
                          }
     
@@ -258,8 +258,8 @@ for (s in 1:3){
   
   # extract 95% bootstrap confidence intervals for design OCs and estimates from naive simulation
   for (j in 1:4){
-    assign(paste0("scen", s, j, ".app"), lin_app(get(paste0("res", s,j,"_120")), get(paste0("res", s,j,"_170")), 
-                                               120, 170, 100, 200, gam))
+    assign(paste0("scen", s, j, ".app"), lin_app(get(paste0("res", s,j,"_120")), get(paste0("res", s,j,"_180")), 
+                                               120, 180, 100, 200, gam))
     
     scen.act <- NULL
     for (i in 1:length(Ms)){
