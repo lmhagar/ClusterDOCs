@@ -1009,9 +1009,13 @@ for (s in 1:3){
 ## format into table
 res.fin.dat <- matrix(res.fin.dat, nrow = 3, byrow = TRUE)
 
-## format into final table
-tab.seq <- rbind(res.int.lin, res.int.dat, res.fin.lin, res.fin.dat)
-tab.seq <- tab.seq[c(1, 4, 7, 10, 2, 5, 8, 11, 4, 6, 9, 12),]
+## format into final tables
+tab.2 <- rbind(1 - res.int.lin, 1 - res.int.dat)
+tab.2 <- tab.2[c(1, 4, 2, 5, 3, 6),]
+
+tab.3 <- rbind(res.fin.lin, res.fin.dat)
+tab.3 <- tab.3[c(1, 4, 2, 5, 3, 6),]
 
 ## save results to .csv file
-write.csv(tab.seq, "seq_table.csv", row.names = FALSE)
+write.csv(tab.2, "table2.csv", row.names = FALSE)
+write.csv(tab.3, "table3.csv", row.names = FALSE)
